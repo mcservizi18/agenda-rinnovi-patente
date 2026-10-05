@@ -1,0 +1,9 @@
+{
+  "name": "agenda-rinnovi-patente",
+  "version": "1.0.0",
+  "description": "Agenda delle visite di rinnovo patente - Agenzia MC Servizi",
+  "main": "server.js",
+  "private": true,
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
