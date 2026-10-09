@@ -88,6 +88,20 @@ if (!db.utenti.length) {
   console.log("==============================================");
 }
 
+// recupero accesso: se RESET_ADMIN_PASSWORD è impostata, all'avvio azzera la password dell'amministratore
+if (process.env.RESET_ADMIN_PASSWORD) {
+  const username = (process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
+  let u = db.utenti.find(x => x.username === username);
+  if (!u) {
+    u = { id: newId("u"), username, nome: "Amministratore", creato: new Date().toISOString() };
+    db.utenti.push(u);
+  }
+  Object.assign(u, hashPassword(process.env.RESET_ADMIN_PASSWORD), { ruolo: "admin", attivo: true, cambiaPassword: true });
+  for (const [k, t] of Object.entries(db.token)) if (t.utente === u.id) delete db.token[k];
+  saveDb();
+  console.log("Password dell'utente " + username + " azzerata con RESET_ADMIN_PASSWORD. Togli la variabile dopo l'accesso.");
+}
+
 function pruneTokens() {
   const now = Date.now();
   for (const [k, t] of Object.entries(db.token)) if (t.scade < now) delete db.token[k];
