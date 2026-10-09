@@ -123,6 +123,23 @@ main{max-width:1100px;margin:0 auto;padding-inline:16px;padding-block:18px 60px;
 .row .d{font-size:13px}
 .row .d b{display:block;font-family:var(--font-mono);font-size:14px}
 @media (max-width:560px){.row{grid-template-columns:minmax(0,1fr)}.row .acts{justify-content:flex-start}}
+/* incasso rapido */
+.slot.busy{grid-template-columns:62px minmax(0,1fr) auto auto}
+.row.has-pay{grid-template-columns:120px minmax(0,1fr) auto auto}
+.pay{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.pay .grp{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--surface)}
+.pay .grp.need{border-color:var(--yellow);box-shadow:0 0 0 2px var(--yellow-soft)}
+.chip{border:0;border-right:1px solid var(--line);background:transparent;padding:5px 9px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);line-height:1.15;text-align:center;white-space:nowrap}
+.chip:last-child{border-right:0}
+.chip small{display:block;font-size:10px;font-weight:500;letter-spacing:.03em;text-transform:uppercase}
+.chip:hover:not(:disabled){color:var(--fg);background:var(--surface-2)}
+.chip.on{background:var(--ok);color:#fff}
+.chip.on.mod{background:var(--ink);color:#fff}
+.chip:disabled{cursor:default}
+.paysum{font-size:13px;color:var(--muted);display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center}
+.paysum b{color:var(--fg);font-family:var(--font-mono);font-weight:500}
+@media (max-width:760px){.slot.busy{grid-template-columns:62px minmax(0,1fr) auto}.slot.busy .acts{grid-column:2/-1;justify-content:flex-start}.row.has-pay{grid-template-columns:120px minmax(0,1fr) auto}.row.has-pay .acts{grid-column:2/-1;justify-content:flex-start}}
+@media (max-width:560px){.slot.busy{grid-template-columns:52px minmax(0,1fr)}.slot.busy .pay,.slot.busy .acts{grid-column:2}.row.has-pay{grid-template-columns:minmax(0,1fr)}.row.has-pay .pay,.row.has-pay .acts{grid-column:1}}
 
 .filters{display:flex;gap:8px;flex-wrap:wrap}
 .filters input,.filters select{padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);min-width:0}
@@ -280,14 +297,36 @@ function render(){
 function renderKpis(){
   const t=today(),ws=mondayOf(t),we=addDays(ws,6);
   const oggi=S.app.filter(a=>a.data===t&&attivo(a)).length;
-  const sett=S.app.filter(a=>a.data>=ws&&a.data<=we&&attivo(a)).length;
+  const inc=incassi(S.app.filter(a=>(a.pagatoIl||a.data)===t));
   const mancanti=S.app.filter(a=>a.data>=t&&attivo(a)&&!["visitato","concluso"].includes(a.stato)&&docsMancanti(a).length).length;
   const prossima=S.sess.filter(s=>s.data>=t).sort((a,b)=>(a.data+a.inizio).localeCompare(b.data+b.inizio))[0];
   $("#kpis").innerHTML=
     `<div class="kpi"><b class="mono">${oggi}</b><span>Visite oggi</span></div>`+
-    `<div class="kpi"><b class="mono">${sett}</b><span>Questa settimana</span></div>`+
+    `<div class="kpi"><b class="mono">${euro(inc.tot)}</b><span>Incassato oggi · cont. ${euro(inc.contanti)} · POS ${euro(inc.pos)}</span></div>`+
     `<div class="kpi ${mancanti?"alert":""}"><b class="mono">${mancanti}</b><span>Con documenti mancanti</span></div>`+
     `<div class="kpi"><b>${prossima?esc(fmtShort(prossima.data).slice(0,5))+" "+esc(prossima.inizio):"—"}</b><span>Prossima giornata medico</span></div>`;
+}
+const TARIFFE=[[70,"agenzia","Ritiro in agenzia"],[77,"recapito","Spedita al recapito"]];
+const MODALITA=[["contanti","Contanti"],["pos","POS"]];
+function payBox(a){
+  const dis=S.readOnly?"disabled":"";
+  const imp=a.pagato?Number(a.importo):0;
+  const t=TARIFFE.map(([v,k,l])=>`<button type="button" class="chip ${imp===v?"on":""}" data-act="pay" data-v="${v}" data-id="${a.id}" title="${l}" aria-pressed="${imp===v}" ${dis}>${v} €<small>${k}</small></button>`).join("");
+  const m=MODALITA.map(([k,l])=>`<button type="button" class="chip mod ${a.pagamento===k?"on":""}" data-act="mod" data-v="${k}" data-id="${a.id}" aria-pressed="${a.pagamento===k}" ${dis}>${l}</button>`).join("");
+  return `<div class="pay" aria-label="Pagamento"><span class="grp">${t}</span><span class="grp ${a.pagato&&!a.pagamento?"need":""}" title="${a.pagato&&!a.pagamento?"Indica come ha pagato":"Modalità di pagamento"}">${m}</span></div>`;
+}
+function incassi(list){const r={contanti:0,pos:0,altro:0,tot:0,n:0};list.forEach(a=>{if(!a.pagato||!a.importo)return;const v=Number(a.importo)||0;r.tot+=v;r.n++;r[a.pagamento==="contanti"?"contanti":a.pagamento==="pos"?"pos":"altro"]+=v;});return r;}
+function paySummary(r){return `<span>Incassato <b>${euro(r.tot)}</b></span><span>Contanti <b>${euro(r.contanti)}</b></span><span>POS <b>${euro(r.pos)}</b></span>${r.altro?`<span style="color:var(--warn)">Senza modalità <b>${euro(r.altro)}</b></span>`:""}`;}
+async function setPay(id,kind,v){
+  const a=S.app.find(x=>x.id===id);if(!a||S.readOnly)return;
+  const r=Object.assign({},a);
+  if(kind==="pay"){
+    const on=r.pagato&&Number(r.importo)===v;
+    if(on){r.pagato=false;r.importo=null;r.consegna="";r.pagatoIl="";}
+    else{r.pagato=true;r.importo=v;r.consegna=v===77?"recapito":"agenzia";r.pagatoIl=r.pagatoIl||today();}
+  }else{r.pagamento=r.pagamento===v?"":v;}
+  Object.assign(a,r);if(!$("#ov"))render();
+  await saveDoc("appuntamenti",id,r);
 }
 function pillsApp(a){
   const st=STATI[a.stato]||STATI.prenotato;
@@ -295,7 +334,8 @@ function pillsApp(a){
   let h=`<span class="pill cat">${esc(a.categoria||"B")}</span><span class="pill ${st.c}">${st.l}</span>`;
   if(attivo(a)&&!["concluso"].includes(a.stato))h+=m.length?`<span class="pill warn" title="${esc(m.map(k=>DOCS.find(d=>d[0]===k)[1]).join(", "))}">Mancano ${m.length} doc.</span>`:`<span class="pill ok">Documenti ok</span>`;
   if(a.scadenza&&a.scadenza<(a.data||today()))h+=`<span class="pill bad">Patente scaduta</span>`;
-  if(a.importo)h+=`<span class="pill ${a.pagato?"ok":"warn"}">${euro(a.importo)}${a.pagato?" pagato":" da incassare"}</span>`;
+  if(a.importo&&![70,77].includes(Number(a.importo)))h+=`<span class="pill ${a.pagato?"ok":"warn"}">${euro(a.importo)}${a.pagato?" pagato":" da incassare"}</span>`;
+  if(!a.pagato&&attivo(a)&&["visitato","concluso"].includes(a.stato))h+=`<span class="pill warn">Da incassare</span>`;
   return h;
 }
 function actsApp(a){
@@ -332,7 +372,7 @@ function viewAgenda(){
         body+=`<div class="slot free"><span class="tm">${h}</span><span class="who">Libero${here.length?" · "+here.length+" annullato/assente":""}</span><div class="acts">${S.readOnly?"":`<button class="btn sm primary" data-act="book" data-sess="${s.id}" data-ora="${h}">Prenota</button>`}</div></div>`;
       }
       live.forEach(a=>{
-        body+=`<div class="slot busy"><span class="tm">${h}</span><div class="who"><span class="nm" data-act="edit" data-id="${a.id}">${esc(a.cognome)} ${esc(a.nome)}</span>${a.telefono?` <span class="mono" style="font-size:13px;color:var(--muted)">${esc(a.telefono)}</span>`:""}<div class="meta">${pillsApp(a)}</div></div><div class="acts">${actsApp(a)}</div></div>`;
+        body+=`<div class="slot busy"><span class="tm">${h}</span><div class="who"><span class="nm" data-act="edit" data-id="${a.id}">${esc(a.cognome)} ${esc(a.nome)}</span>${a.telefono?` <span class="mono" style="font-size:13px;color:var(--muted)">${esc(a.telefono)}</span>`:""}<div class="meta">${pillsApp(a)}</div></div>${payBox(a)}<div class="acts">${actsApp(a)}</div></div>`;
       });
     });
     body+=`</div>`;
@@ -340,7 +380,7 @@ function viewAgenda(){
   const fuori=apps.filter(a=>!usati.has(a.id));
   if(fuori.length){
     body+=`<div class="panel"><div class="panel-h"><span class="t">${sess.length?"Fuori dagli slot del medico":"Appuntamenti del giorno"}</span><span class="s"></span></div>`;
-    fuori.forEach(a=>{body+=`<div class="slot busy"><span class="tm">${esc(a.ora||"--:--")}</span><div class="who"><span class="nm" data-act="edit" data-id="${a.id}">${esc(a.cognome)} ${esc(a.nome)}</span><div class="meta">${pillsApp(a)}</div></div><div class="acts">${actsApp(a)}</div></div>`;});
+    fuori.forEach(a=>{body+=`<div class="slot busy"><span class="tm">${esc(a.ora||"--:--")}</span><div class="who"><span class="nm" data-act="edit" data-id="${a.id}">${esc(a.cognome)} ${esc(a.nome)}</span><div class="meta">${pillsApp(a)}</div></div>${payBox(a)}<div class="acts">${actsApp(a)}</div></div>`;});
     body+=`</div>`;
   }
   if(!sess.length&&!fuori.length){
@@ -358,6 +398,7 @@ function viewAgenda(){
       ${S.readOnly?"":`<button class="btn primary" data-act="book">+ Appuntamento</button><button class="btn" data-act="newSess">+ Giornata medico</button>`}
       ${apps.length?`<button class="btn ghost" data-act="csv">Scarica elenco del giorno</button>`:""}
     </div>
+    ${apps.some(a=>a.pagato)?`<div class="paysum">${paySummary(incassi(apps))}</div>`:""}
     ${body}</div>`;
 }
 
@@ -366,18 +407,18 @@ function viewElenco(){
   let list=S.app.slice();
   if(S.fStato==="futuri")list=list.filter(a=>a.data>=t);
   else if(S.fStato==="docs")list=list.filter(a=>a.data>=t&&attivo(a)&&!["visitato","concluso"].includes(a.stato)&&docsMancanti(a).length);
-  else if(S.fStato==="incasso")list=list.filter(a=>a.importo&&!a.pagato&&attivo(a));
+  else if(S.fStato==="incasso")list=list.filter(a=>!a.pagato&&attivo(a)&&a.data<=t);
   else if(S.fStato==="aperti")list=list.filter(a=>a.stato==="visitato");
   else if(S.fStato!=="tutti")list=list.filter(a=>a.stato===S.fStato);
   if(q)list=list.filter(a=>[a.cognome,a.nome,a.telefono,a.numeroPatente].join(" ").toLowerCase().includes(q));
   const asc=["futuri","docs"].includes(S.fStato);
   list.sort((a,b)=>((a.data||"")+(a.ora||"")).localeCompare((b.data||"")+(b.ora||""))*(asc?1:-1));
-  const rows=list.map(a=>`<div class="row"><div class="d"><b>${fmtShort(a.data)}</b>${esc(a.ora||"")}</div><div class="who"><span class="nm" data-act="edit" data-id="${a.id}">${esc(a.cognome)} ${esc(a.nome)}</span>${a.telefono?` <span class="mono" style="font-size:13px;color:var(--muted)">${esc(a.telefono)}</span>`:""}<div class="meta">${pillsApp(a)}</div></div><div class="acts">${actsApp(a)}</div></div>`).join("");
+  const rows=list.map(a=>`<div class="row has-pay"><div class="d"><b>${fmtShort(a.data)}</b>${esc(a.ora||"")}</div><div class="who"><span class="nm" data-act="edit" data-id="${a.id}">${esc(a.cognome)} ${esc(a.nome)}</span>${a.telefono?` <span class="mono" style="font-size:13px;color:var(--muted)">${esc(a.telefono)}</span>`:""}<div class="meta">${pillsApp(a)}</div></div>${payBox(a)}<div class="acts">${actsApp(a)}</div></div>`).join("");
   return `<div style="display:flex;flex-direction:column;gap:12px">
     <div class="bar"><h2>Appuntamenti</h2>${S.readOnly?"":`<button class="btn primary" data-act="book">+ Appuntamento</button>`}</div>
     <div class="filters"><input id="q" type="search" placeholder="Cerca per cognome, nome, telefono, n. patente" value="${esc(S.q)}">
       <select id="fStato" aria-label="Filtro">
-        ${[["futuri","Da oggi in poi"],["docs","Con documenti mancanti"],["aperti","Visita fatta, pratica da chiudere"],["incasso","Da incassare"],["tutti","Tutti"],...Object.entries(STATI).map(([k,v])=>[k,v.l])].map(([k,l])=>`<option value="${k}" ${S.fStato===k?"selected":""}>${l}</option>`).join("")}
+        ${[["futuri","Da oggi in poi"],["docs","Con documenti mancanti"],["aperti","Visita fatta, pratica da chiudere"],["incasso","Da incassare (visite già passate)"],["tutti","Tutti"],...Object.entries(STATI).map(([k,v])=>[k,v.l])].map(([k,l])=>`<option value="${k}" ${S.fStato===k?"selected":""}>${l}</option>`).join("")}
       </select></div>
     <div class="panel">${rows?`<div class="list">${rows}</div>`:`<div class="empty"><strong>Nessun appuntamento</strong>${S.app.length?"Nessun risultato con questi filtri.":"Gli appuntamenti prenotati dall'agenda compaiono qui, con ricerca per nome, telefono o numero di patente."}</div>`}</div></div>`;
 }
@@ -469,6 +510,8 @@ function openApp(a,preset){
     </div>
     <fieldset><legend>Documenti consegnati</legend><div class="checks">${DOCS.map(([k,l])=>`<label><input type="checkbox" name="doc_${k}" id="f-doc-${k}" ${d[k]?"checked":""}> ${l}</label>`).join("")}</div></fieldset>
     <div class="grid">
+      <label class="f">Consegna patente<select name="consegna" id="f-cons"><option value="">—</option><option value="agenzia" ${a.consegna==="agenzia"?"selected":""}>Ritiro in agenzia (70 €)</option><option value="recapito" ${a.consegna==="recapito"?"selected":""}>Spedita al recapito (77 €)</option></select></label>
+      <label class="f">Modalità di pagamento<select name="pagamento" id="f-modp"><option value="">—</option>${MODALITA.map(([k,l])=>`<option value="${k}" ${a.pagamento===k?"selected":""}>${l}</option>`).join("")}</select></label>
       <label class="f">Importo pratica (€)<input name="importo" id="f-imp" type="number" min="0" step="0.5" inputmode="decimal" value="${a.importo!=null?esc(a.importo):""}"></label>
       <label class="f" style="justify-content:flex-end"><span class="checks"><label style="text-transform:none;font-weight:500;color:var(--fg)"><input type="checkbox" name="pagato" id="f-pag" ${a.pagato?"checked":""}> Pagato</label></span></label>
       <label class="f full">Note<textarea name="note" id="f-note" placeholder="Es. usa occhiali, ha già fatto i PagoPA, chiamare dopo le 17">${esc(a.note)}</textarea></label>
@@ -490,6 +533,7 @@ function openApp(a,preset){
     f.elements.data.addEventListener("change",()=>{const cur=f.elements.sessioneId.value;const ss=S.sess.filter(s=>s.data===f.elements.data.value);f.elements.sessioneId.innerHTML=sessOptions(f.elements.data.value,ss.some(s=>s.id===cur)?cur:(ss[0]||{}).id);f.elements.oraSel.innerHTML=oraOptions(f.elements.sessioneId.value,f.elements.data.value,null,a.id);upd();});
     f.elements.sessioneId.addEventListener("change",()=>{f.elements.oraSel.innerHTML=oraOptions(f.elements.sessioneId.value,f.elements.data.value,null,a.id);upd();});
     ["categoria","nascita","scadenza"].forEach(n=>f.elements[n].addEventListener("change",upd));
+    f.elements.consegna.addEventListener("change",()=>{const c=f.elements.consegna.value;if(c){f.elements.importo.value=c==="recapito"?77:70;}});
     if(preset&&preset.ora&&f.elements.oraSel.querySelector(`option[value="${preset.ora}"]`))f.elements.oraSel.value=preset.ora;
     else if(isNew&&f.elements.sessioneId.value){const first=[...f.elements.oraSel.options].find(o=>!o.disabled);if(first)f.elements.oraSel.value=first.value;}
     upd();
@@ -504,7 +548,7 @@ function openApp(a,preset){
       if(!fv(f,"cognome")||!fv(f,"nome")||!fv(f,"data")||!ora){err.textContent="Compila cognome, nome, data e orario della visita.";err.hidden=false;return;}
       if(sid&&S.app.some(x=>x.sessioneId===sid&&x.ora===ora&&attivo(x)&&x.id!==a.id)&&attivo({stato:fv(f,"stato")})){err.textContent="Questo orario è già occupato: scegline un altro.";err.hidden=false;return;}
       const doc={};DOCS.forEach(([k])=>doc[k]=f.elements["doc_"+k].checked);
-      const rec={cognome:fv(f,"cognome"),nome:fv(f,"nome"),telefono:fv(f,"telefono"),nascita:fv(f,"nascita"),categoria:fv(f,"categoria"),numeroPatente:fv(f,"numeroPatente").toUpperCase(),scadenza:fv(f,"scadenza"),stato:fv(f,"stato"),data:fv(f,"data"),sessioneId:sid,ora,doc,importo:fv(f,"importo")===""?null:Number(fv(f,"importo")),pagato:f.elements.pagato.checked,note:fv(f,"note"),scadId:a.scadId||"",aggiornato:new Date().toISOString()};
+      const rec={cognome:fv(f,"cognome"),nome:fv(f,"nome"),telefono:fv(f,"telefono"),nascita:fv(f,"nascita"),categoria:fv(f,"categoria"),numeroPatente:fv(f,"numeroPatente").toUpperCase(),scadenza:fv(f,"scadenza"),stato:fv(f,"stato"),data:fv(f,"data"),sessioneId:sid,ora,doc,importo:fv(f,"importo")===""?null:Number(fv(f,"importo")),pagato:f.elements.pagato.checked,consegna:fv(f,"consegna"),pagamento:fv(f,"pagamento"),pagatoIl:f.elements.pagato.checked?(a.pagatoIl||today()):"",note:fv(f,"note"),scadId:a.scadId||"",aggiornato:new Date().toISOString()};
       if(isNew)rec.creato=new Date().toISOString();else rec.creato=a.creato||"";
       const id=a.id||("a"+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
       const ok=await saveDoc("appuntamenti",id,rec);
@@ -597,8 +641,8 @@ function openWa(id){const a=S.app.find(x=>x.id===id);if(a)showMsg("Promemoria ap
 async function downloadCsv(){
   const apps=S.app.filter(a=>a.data===S.day&&attivo(a)).sort((a,b)=>(a.ora||"").localeCompare(b.ora||""));
   const q=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
-  const lines=[["Ora","Cognome","Nome","Nato il","Categoria","N. patente","Scadenza","Telefono","Documenti mancanti","Note"].map(q).join(";")];
-  apps.forEach(a=>lines.push([a.ora,a.cognome,a.nome,fmtShort(a.nascita),a.categoria,a.numeroPatente,fmtShort(a.scadenza),a.telefono,docsMancanti(a).map(k=>DOCS.find(d=>d[0]===k)[1]).join(", "),a.note].map(q).join(";")));
+  const lines=[["Ora","Cognome","Nome","Nato il","Categoria","N. patente","Scadenza","Telefono","Documenti mancanti","Importo","Consegna","Pagamento","Note"].map(q).join(";")];
+  apps.forEach(a=>lines.push([a.ora,a.cognome,a.nome,fmtShort(a.nascita),a.categoria,a.numeroPatente,fmtShort(a.scadenza),a.telefono,docsMancanti(a).map(k=>DOCS.find(d=>d[0]===k)[1]).join(", "),a.pagato&&a.importo?String(a.importo).replace(".",","):"",a.consegna==="recapito"?"Recapito":a.consegna==="agenzia"?"Agenzia":"",a.pagamento==="pos"?"POS":a.pagamento==="contanti"?"Contanti":"",a.note].map(q).join(";")));
   const blob=new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`rinnovi-${S.day}.csv`;document.body.appendChild(a);a.click();
   setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
@@ -614,6 +658,8 @@ document.addEventListener("click",e=>{
   else if(act==="book"){openApp(null,t.dataset.sess?{sessioneId:t.dataset.sess,ora:t.dataset.ora,data:S.day}:{data:S.day});}
   else if(act==="edit"){const a=S.app.find(x=>x.id===id);if(a)openApp(a);}
   else if(act==="wa")openWa(id);
+  else if(act==="pay")setPay(id,"pay",Number(t.dataset.v));
+  else if(act==="mod")setPay(id,"mod",t.dataset.v);
   else if(act==="stato"){const a=S.app.find(x=>x.id===id);if(a)saveDoc("appuntamenti",id,Object.assign({},a,{stato:t.dataset.v,id:undefined})).then(ok=>ok&&toast("Stato: "+STATI[t.dataset.v].l));}
   else if(act==="newSess")openSess(null);
   else if(act==="editSess"){const s=S.sess.find(x=>x.id===id);if(s)openSess(s);}
